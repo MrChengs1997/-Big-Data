@@ -366,11 +366,301 @@ hive (default)> select * from stu;
 
 **5.使用到HDFS**
 
+```
+# Name the components on this agent
+a2.sources = r2
+a2.sinks = k2
+a2.channels = c2
+
+# Describe/configure the source
+a2.sources.r2.type = exec
+a2.sources.r2.command = tail -F /opt/module/hive/logs/hive.log
+a2.sources.r2.shell = /bin/bash -c
+
+# Describe the sink
+a2.sinks.k2.type = hdfs
+a2.sinks.k2.hdfs.path = hdfs://hadoop2:9000/flume/%Y%m%d/%H
+
+#上传文件的前缀
+a2.sinks.k2.hdfs.filePrefix = logs- #是否按照时间滚动文件夹
+a2.sinks.k2.hdfs.round = true
+
+#多少时间单位创建一个新的文件夹
+a2.sinks.k2.hdfs.roundValue = 1
+
+#重新定义时间单位
+a2.sinks.k2.hdfs.roundUnit = hour
+
+#是否使用本地时间戳
+a2.sinks.k2.hdfs.useLocalTimeStamp = true
+
+#积攒多少个 Event 才 flush 到 HDFS 一次
+a2.sinks.k2.hdfs.batchSize = 1000
+
+#设置文件类型，可支持压缩
+a2.sinks.k2.hdfs.fileType = DataStream
+
+#多久生成一个新的文件
+a2.sinks.k2.hdfs.rollInterval = 30
+
+#设置每个文件的滚动大小
+a2.sinks.k2.hdfs.rollSize = 134217700
+
+#文件的滚动与 Event 数量无关
+a2.sinks.k2.hdfs.rollCount = 0
+
+# Use a channel which buffers events in memory
+a2.channels.c2.type = memory
+a2.channels.c2.capacity = 1000
+a2.channels.c2.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a2.sources.r2.channels = c2
+a2.sinks.k2.channel = c2
+```
+
+**注意**： 
+
+对于所有与时间相关的转义序列，Event Header 中必须存在以 “timestamp”的 key（除非 
+
+hdfs.useLocalTimeStamp 设置为 true，此方法会使用 TimestampInterceptor 自动添加 
+
+timestamp）。 
+
+a3.sinks.k3.hdfs.useLocalTimeStamp = true
+
+
+
+配置文件
+
+![](picc/HDFS.png)
+
+
+
+启动flume
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent -c conf/ -f job/flume-file-hdfs.conf  -n a2
+
+```
+
+
+
+启动之后就会创建相应的文件夹
+
+在点进去之后会创建相应的时间类型的文件夹
+
+![](picc/hdfs_flume.png)
+
+
+
+执行一个hive命令
+
+```
+hive (default)> select * from stu;
+```
+
+![](picc/hive_select.png)
 
 
 
 
 
+## 2.2.3 实时监控目录下多个新文件
+
+**1）案例需求：使用 Flume 监听整个目录的文件，并上传至 HDFS** 
+
+**2）需求分析：**
+
+![](picc/spooldir.png)
+
+**1．创建配置文件 flume-dir-hdfs.conf** 
+
+创建一个文件 
+
+```
+ vim flume-dir-hdfs.conf
+```
+
+```
+a3.sources = r3
+a3.sinks = k3
+a3.channels = c3
+# Describe/configure the source
+a3.sources.r3.type = spooldir
+a3.sources.r3.spoolDir = /opt/module/flume/upload
+a3.sources.r3.fileSuffix = .COMPLETED
+a3.sources.r3.fileHeader = true
+#忽略所有以.tmp 结尾的文件，不上传
+a3.sources.r3.ignorePattern = ([^ ]*\.tmp)
+# Describe the sink
+a3.sinks.k3.type = hdfs
+a3.sinks.k3.hdfs.path = 
+hdfs://hadoop102:9000/flume/upload/%Y%m%d/%H
+#上传文件的前缀
+a3.sinks.k3.hdfs.filePrefix = upload- #是否按照时间滚动文件夹
+a3.sinks.k3.hdfs.round = true
+#多少时间单位创建一个新的文件夹
+a3.sinks.k3.hdfs.roundValue = 1
+#重新定义时间单位
+a3.sinks.k3.hdfs.roundUnit = hour
+#是否使用本地时间戳
+a3.sinks.k3.hdfs.useLocalTimeStamp = true
+#积攒多少个 Event 才 flush 到 HDFS 一次
+a3.sinks.k3.hdfs.batchSize = 100
+实时读取目录文件到HDFS案例
+a3.sources = r3 a3.sinks = k3 a3.channels = c3 # Describe/configure the source
+a3.sources.r3.type = spooldir
+a3.sources.r3.spoolDir = /opt/module/flume/upload
+a3.sources.r3.fileSuffix = .COMPLETED
+a3.sources.r3.fileHeader = true
+a3.sources.r3.ignorePattern = ([^ ]*\.tmp) # Describe the sink
+a3.sinks.k3.type = hdfs
+a3.sinks.k3.hdfs.path =
+hdfs://hadoop102:9000/flume/upload/%Y%m%d/% Ha3.sinks.k3.hdfs.filePrefix = upload- a3.sinks.k3.hdfs.round = true
+a3.sinks.k3.hdfs.roundValue = 1 a3.sinks.k3.hdfs.roundUnit = hour
+a3.sinks.k3.hdfs.useLocalTimeStamp = true
+a3.sinks.k3.hdfs.batchSize = 100
+a3.sinks.k3.hdfs.fileType = DataStream
+a3.sinks.k3.hdfs.rollInterval = 60
+a3.sinks.k3.hdfs.rollSize = 134217700
+a3.sinks.k3.hdfs.rollCount = 0 # Use a channel which buffers events in memory
+a3.channels.c3.type = memory
+a3.channels.c3.capacity = 1000
+a3.channels.c3.transactionCapacity = 100
+# Bind the source and sink to the channel
+a3.sources.r3.channels = c3 a3.sinks.k3.channel = c3 #定义source
+#定义sink
+#定义channel
+#定义source类型为目录
+#定义监控目录
+#定义文件上传完，后缀
+#是否有文件头
+#忽略所有以.tmp结尾的文件，不上传
+#sink类型为hdfs
+#文件上传到hdfs的路径
+#上传文件到hdfs的前缀
+#是否按时间滚动文件
+#多少时间单位创建一个新的文件夹
+#重新定义时间单位
+#是否使用本地时间戳
+#积攒多少个Event才flush到HDFS一次
+#设置文件类型，可支持压缩
+#多久生成新文件
+#多大生成新文件
+#多少event生成新文件
+
+#设置文件类型，可支持压缩
+a3.sinks.k3.hdfs.fileType = DataStream
+#多久生成一个新的文件
+a3.sinks.k3.hdfs.rollInterval = 60
+#设置每个文件的滚动大小大概是 128M
+a3.sinks.k3.hdfs.rollSize = 134217700
+#文件的滚动与 Event 数量无关
+a3.sinks.k3.hdfs.rollCount = 0
+# Use a channel which buffers events in memory
+a3.channels.c3.type = memory
+a3.channels.c3.capacity = 1000
+a3.channels.c3.transactionCapacity = 100
+# Bind the source and sink to the channel
+a3.sources.r3.channels = c3
+a3.sinks.k3.channel = c3
+```
 
 
+
+![](picc/spooldir_test.png)
+
+
+
+**2.启动监控文件夹命令**
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent  -c conf/ -f job/flume-dir-hdfs.conf  -n a3
+
+```
+
+说明：在使用 Spooling Directory Source 时 
+
+不要在监控目录中创建并持续修改文件 
+
+上传完成的文件会以.COMPLETED 结尾 
+
+被监控文件夹每 500 毫秒扫描一次文件变动
+
+
+
+**3. 向 upload 文件夹中添加文件**
+
+在/opt/module/flume 目录下创建 upload 文件夹
+
+```
+ mkdir upload
+```
+
+向 upload 文件夹中添加文件
+
+```
+cp a.txt  upload/
+
+```
+
+
+
+**4. 查看 HDFS 上的数据**
+
+![](picc/dir.png)
+
+查看hdfs上的文件
+
+```
+[root@hadoop2 hadoop-2.7.2]# bin/hadoop fs -cat /flume/upload/20191028/12/upload-.1572278671681
+123123
+```
+
+查看源文件
+
+```
+[root@hadoop2 flume]# cat a.txt 
+123123
+```
+
+
+
+```
+[root@hadoop2 flume]# ll upload/
+total 8
+-rw-r--r--. 1 root root    7 Oct 28 12:04 a.txt.COMPLETED
+-rw-r--r--. 1 root root 2520 Oct 28 11:59 README.md.COMPLETED
+```
+
+
+
+对于后缀名只是简单的进行校验
+
+否则可能会被拦截
+
+已经放进去的文件此时不会被二次上传（即新文件）
+
+
+
+此时会报错
+
+在报错的情况下不能再次进行上传
+
+此时需要进行删除之后上传的文件
+
+
+
+可以使用正则  匹配后置结尾的文件
+
+如a.tmp
+
+可以被过滤就不会进行上传新文件
+
+
+
+
+
+## **2.2.4 实时监控目录下的多个追加文件**
 
