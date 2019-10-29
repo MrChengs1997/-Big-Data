@@ -664,3 +664,186 @@ total 8
 
 ## **2.2.4 实时监控目录下的多个追加文件**
 
+Exec source 适用于监控一个实时追加的文件，但不能保证数据不丢失
+
+Spooldir   Source 能够保证数据不丢失，且能够实现断点续传，但延迟较高，不能实时监控
+
+Taildir  Source 既能够实现断点续传，又可以保证数据不丢失，还能够进行实时监控
+
+
+
+**1）案例需求：使用 Flume 监听整个目录的实时追加文件，并上传至 HDFS**
+
+
+
+**2）需求分析**
+
+![](picc/taildir.png)
+
+
+
+**实现步骤：** 
+
+**1．创建配置文件 flume-taildir-hdfs.conf**
+
+```
+a3.sources = r3
+a3.sinks = k3
+a3.channels = c3
+
+
+# Describe/configure the source
+a3.sources.r3.type = TAILDIR
+a3.sources.r3.positionFile = /opt/module/flume/tail_dir.json
+a3.sources.r3.filegroups = f1
+a3.sources.r3.filegroups.f1 = /opt/module/flume/files/file.*
+
+# Describe the sink
+a3.sinks.k3.type = logger
+
+
+#上传文件的前缀
+a3.sinks.k3.hdfs.filePrefix = upload- 
+
+#是否按照时间滚动文件夹
+a3.sinks.k3.hdfs.round = true
+
+#多少时间单位创建一个新的文件夹
+a3.sinks.k3.hdfs.roundValue = 1
+
+#重新定义时间单位
+a3.sinks.k3.hdfs.roundUnit = hour
+
+#是否使用本地时间戳
+a3.sinks.k3.hdfs.useLocalTimeStamp = true
+
+#积攒多少个 Event 才 flush 到 HDFS 一次
+a3.sinks.k3.hdfs.batchSize = 100
+
+#设置文件类型，可支持压缩
+a3.sinks.k3.hdfs.fileType = DataStream
+
+#多久生成一个新的文件
+a3.sinks.k3.hdfs.rollInterval = 60
+
+#设置每个文件的滚动大小大概是 128M
+a3.sinks.k3.hdfs.rollSize = 134217700 
+
+#文件的滚动与 Event 数量无关
+a3.sinks.k3.hdfs.rollCount = 0
+
+# Use a channel which buffers events in memory
+a3.channels.c3.type = memory
+a3.channels.c3.capacity = 1000
+a3.channels.c3.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a3.sources.r3.channels = c3
+a3.sinks.k3.channel = c3
+```
+
+
+
+![](picc/taildir_so.png)
+
+
+
+**2.启动监控文件夹命令**
+
+```
+ bin/flume-ng agent --conf conf/ --name  a3 --conf-file job/flume-taildir-hdfs.conf
+```
+
+
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent -c conf/ -f job/flume-taildir-hdfs.conf  -n a3 -Dflume.root.logger=INFO,console
+```
+
+
+
+**3. 向 files 文件夹中追加内容**
+
+在/opt/module/flume 目录下创建 files 文件夹
+
+```
+mkdir files
+```
+
+
+
+```
+[root@hadoop2 files]# echo >> file1.txt
+[root@hadoop2 files]# echo helloword  >> file1.txt
+```
+
+
+
+向 files文件夹中添加文件
+
+```
+2019-10-29 12:26:59,940 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: }
+2019-10-29 12:27:10,338 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 68 65 6C 6C 6F 77 6F 72 64                      helloword }
+
+```
+
+
+
+
+
+假设此时flume挂掉
+
+此时再次启动依然会按照改变的顺序进行监控目录下的追加文件
+
+
+
+注意：
+
+```
+a3.sources.r3.positionFile = /opt/module/flume/tail_dir.json
+a3.sources.r3.filegroups = f1
+a3.sources.r3.filegroups.f1 = /opt/module/flume/files/file.*
+a3.sources.r3.filegroups.f1 = /opt/module/flume/files/file2.*
+```
+
+此时会覆盖在file2.* 中会进行监控
+
+
+
+
+
+**Taildir 说明：**
+
+Taildir Source 维护了一个 json 格式的 position File，其会定期的往 position File 
+
+中更新每个文件读取到的最新的位置，因此能够实现断点续传。
+
+
+
+Position File 的格式如下：
+
+```
+{"inode":2496272,"pos":12,"file":"/opt/module/flume/files/file1.t
+xt"}
+{"inode":2496275,"pos":12,"file":"/opt/module/flume/files/file2.t
+xt"}
+```
+
+
+
+注：
+
+Linux 中储存文件元数据的区域就叫做 inode，每个 inode 都有一个号码，操作系统 
+
+用 inode 号码来识别不同的文件，Unix/Linux 系统内部不使用文件名，而使用 inode 号码来
+
+识别文件。
+
+
+
+
+
+
+
+
+
