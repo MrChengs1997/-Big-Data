@@ -498,7 +498,8 @@ a3.sinks.k3.type = hdfs
 a3.sinks.k3.hdfs.path = 
 hdfs://hadoop102:9000/flume/upload/%Y%m%d/%H
 #上传文件的前缀
-a3.sinks.k3.hdfs.filePrefix = upload- #是否按照时间滚动文件夹
+a3.sinks.k3.hdfs.filePrefix = upload- 
+#是否按照时间滚动文件夹
 a3.sinks.k3.hdfs.round = true
 #多少时间单位创建一个新的文件夹
 a3.sinks.k3.hdfs.roundValue = 1
@@ -529,7 +530,8 @@ a3.channels.c3.type = memory
 a3.channels.c3.capacity = 1000
 a3.channels.c3.transactionCapacity = 100
 # Bind the source and sink to the channel
-a3.sources.r3.channels = c3 a3.sinks.k3.channel = c3 #定义source
+a3.sources.r3.channels = c3 a3.sinks.k3.channel = c3 
+#定义source
 #定义sink
 #定义channel
 #定义source类型为目录
