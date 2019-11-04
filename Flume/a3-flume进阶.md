@@ -208,7 +208,7 @@ flume，再由此 flume 上传到 hdfs、hive、hbase 等，进行日志分析�
 
 
 
-## **3.4 Flume** **企业开发案例**(source是服务端)
+## **3.4 Flume** **企业开发案例**
 
 
 
@@ -440,4 +440,241 @@ total 4
 -rw-r--r--. 1 root root 0 Nov  3 11:43 1572799191281-9
 
 ```
+
+
+
+### **3.4.2** **负载均衡和故障转移**
+
+**1）案例需求**
+
+使用 Flume1 监控一个端口，其 sink 组中的 sink 分别对接 Flume2 和 Flume3，采用 
+
+FailoverSinkProcessor，实现故障转移的功能。
+
+
+
+![](picc/FailoverSinkProcessor.png)
+
+
+
+**3）实现步骤** 
+
+
+
+在/opt/module/flume/job 目录下创建 group2 文件夹
+
+
+
+flume1（flume3的优先级比flume2的优先级高）
+
+```
+a1.sources = r1
+a1.sinks = k1 k2
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 44444
+
+# chanel
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# sinks
+# sinks(avro)
+a1.sinks.k1.type = avro
+a1.sinks.k1.hostname = 192.168.199.120
+a1.sinks.k1.port = 4141
+
+a1.sinks.k2.type = avro
+a1.sinks.k2.hostname = 192.168.199.120
+a1.sinks.k2.port = 4142
+
+
+# sinks group定义组
+a1.sinkgroups = g1
+a1.sinkgroups.g1.sinks = k1 k2
+a1.sinkgroups.g1.processor.type = failover
+a1.sinkgroups.g1.processor.priority.k1 = 5
+a1.sinkgroups.g1.processor.priority.k2 = 10
+a1.sinkgroups.g1.processor.maxpenalty = 10000
+
+
+# bind
+a1.sources.r1.channels = c1 
+a1.sinks.k1.channel = c1
+a1.sinks.k2.channel = c1
+```
+
+flume2
+
+```
+#Name
+a2.sources = r1
+a2.channels = c1
+a2.sinks = k1
+
+#Source
+a2.sources.r1.type = avro
+a2.sources.r1.bind = 192.168.199.120
+a2.sources.r1.port = 4141
+
+#Channel
+a2.channels.c1.type = memory
+a2.channels.c1.capacity = 1000
+a2.channels.c1.transactionCapacity = 100
+
+#Sink
+a2.sinks.k1.type = logger
+
+#Bind
+a2.sources.r1.channels = c1
+a2.sinks.k1.channel = c1
+```
+
+flume3
+
+```
+#Name
+a3.sources = r1
+a3.channels = c1
+a3.sinks = k1
+
+#Source
+a3.sources.r1.type = avro
+a3.sources.r1.bind = 192.168.199.120
+a3.sources.r1.port = 4142
+
+#Channel
+a3.channels.c1.type = memory
+a3.channels.c1.capacity = 1000
+a3.channels.c1.transactionCapacity = 100
+
+#Sink
+a3.sinks.k1.type = logger
+
+#Bind
+a3.sources.r1.channels = c1
+a3.sinks.k1.channel = c1
+```
+
+
+
+
+
+一次进行启动
+
+```
+ bin/flume-ng agent -c conf/ -f job/group2/flume2.conf  -n a2 
+-Dflume.root.logger=INFO,console
+
+```
+
+
+
+```
+bin/flume-ng agent -c conf/ -f job/group2/flume3.conf -n a3 -Dflume.root.logger=INFO,console
+```
+
+
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent -c conf/ -f job/group2/flume1.conf -n a1
+```
+
+
+
+#### 故障转移
+
+发送信息
+
+```
+[root@hadoop2 group2]# nc localhost 44444
+helloword
+OK
+
+```
+
+flume3上接收信息
+
+```
+2019-11-04 10:34:25,865 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 68 65 6C 6C 6F 77 6F 72 64                      helloword }
+
+```
+
+此时发送的信息都在flume3上
+
+因为flume3的优先级最高
+
+如果flume3挂掉
+
+此时会寻找flume2进行通信
+
+此时的是一个组
+
+
+
+
+
+#### 负载均衡
+
+在上述的基础上修改flume1的配置文件
+
+Load balancing Sink Processor的配置
+
+```
+a1.sources = r1
+a1.sinks = k1 k2
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 44444
+
+# chanel
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# sinks
+# sinks(avro)
+a1.sinks.k1.type = avro
+a1.sinks.k1.hostname = 192.168.199.120
+a1.sinks.k1.port = 4141
+
+a1.sinks.k2.type = avro
+a1.sinks.k2.hostname = 192.168.199.120
+a1.sinks.k2.port = 4142
+
+
+# sinks group定义组
+a1.sinkgroups = g1
+a1.sinkgroups.g1.sinks = k1 k2
+a1.sinkgroups.g1.processor.type = load_balance
+a1.sinkgroups.g1.processor.backoff = true
+a1.sinkgroups.g1.processor.selector = random
+
+
+# bind
+a1.sources.r1.channels = c1 
+a1.sinks.k1.channel = c1
+a1.sinks.k2.channel = c1
+```
+
+此时的既是负载均衡的配置
+
+
+
+
+
+## **3.4.3** **聚合**
+
+
+
+
+
+
 
