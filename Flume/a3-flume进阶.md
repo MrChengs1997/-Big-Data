@@ -564,7 +564,7 @@ a3.sinks.k1.channel = c1
 
 
 
-一次进行启动
+依次进行启动
 
 ```
  bin/flume-ng agent -c conf/ -f job/group2/flume2.conf  -n a2 
@@ -672,9 +672,281 @@ a1.sinks.k2.channel = c1
 
 ## **3.4.3** **聚合**
 
+**1）案例需求** 
+
+hadoop2 上的 Flume-1 监控文件/opt/module/data/group.log， 
+
+hadoop3 上的 Flume-2 监控某一个端口的数据流， 
+
+Flume-1 与 Flume-2 将数据发送给 hadoop104 上的 Flume-3，Flume-3 将最终数据打印到控 
+
+制台。
 
 
 
+**hadoop2&hadoop3属于客户端能远程连接到服务端**
+
+
+
+
+
+**2）需求分析**
+
+![](picc/聚合分析.png)
+
+
+
+f1 --4141
+
+f2 --4142
+
+f3 --4141&4142使用两个source
+
+
+
+**hadoop2的配置文件**
+
+```
+a2.sources = r1
+a2.sinks = k1
+a2.channels = c1
+
+# Describe/configure the source
+a2.sources.r1.type = TAILDIR
+a2.sources.r1.filegroups = f1
+a2.sources.r1.filegroups.f1 = /opt/module/data/flume2.txt
+a2.sources.r1.positionFile = /opt/module/flume/position/position2.json
+
+
+# channels
+a2.channels.c1.type = memory
+a2.channels.c1.capacity = 1000
+a2.channels.c1.transactionCapacity = 100
+
+# sinks
+a2.sinks.k1.type = avro
+# 绑定到hadoop4机器上
+a2.sinks.k1.hostname = hadoop4
+a2.sinks.k1.port = 4141
+
+
+# bind
+a2.sources.r1.channels = c1 
+a2.sinks.k1.channel = c1
+```
+
+
+
+**hadoop3的配置文件**
+
+```
+a3.sources = r1
+a3.sinks = k1
+a3.channels = c1
+
+# Describe/configure the source
+a3.sources.r1.type = netcat
+a3.sources.r1.bind = localhost
+a3.sources.r1.port = 44444
+
+
+# channels
+a3.channels.c1.type = memory
+a3.channels.c1.capacity = 1000
+a3.channels.c1.transactionCapacity = 100
+
+# sinks
+a3.sinks.k1.type = avro
+# 绑定到hadoop4机器上
+a3.sinks.k1.hostname = hadoop4
+a3.sinks.k1.port = 4141
+
+
+# bind
+a3.sources.r1.channels = c1 
+a3.sinks.k1.channel = c1
+
+a3.sources = r1
+a3.sinks = k1
+a3.channels = c1
+
+# Describe/configure the source
+a3.sources.r1.type = netcat
+a3.sources.r1.bind = localhost
+a3.sources.r1.port = 44444
+
+
+# channels
+a3.channels.c1.type = memory
+a3.channels.c1.capacity = 1000
+a3.channels.c1.transactionCapacity = 100
+
+# sinks
+a3.sinks.k1.type = avro
+# 绑定到hadoop4机器上
+a3.sinks.k1.hostname = hadoop4
+a3.sinks.k1.port = 4141
+
+
+# bind
+a3.sources.r1.channels = c1 
+a3.sinks.k1.channel = c1
+```
+
+
+
+**hadoop4的配置文件**
+
+```
+a4.sources = r1
+a4.sinks = k1
+a4.channels = c1
+
+# Describe/configure the source
+a4.sources.r1.type = avro
+a4.sources.r1.bind = hadoop4
+a4.sources.r1.port = 4141
+
+
+# channels
+a4.channels.c1.type = memory
+a4.channels.c1.capacity = 1000
+a4.channels.c1.transactionCapacity = 100
+
+# sinks
+a4.sinks.k1.type = logger
+
+
+
+# bind
+a4.sources.r1.channels = c1 
+a4.sinks.k1.channel = c1
+```
+
+
+
+一次进行启动
+
+hadoop4
+
+```
+[root@hadoop4 flume]# bin/flume-ng agent -c conf/ -f job/group3/flume44.conf  -n a4 -Dflume.root.logger=INFO,console
+
+```
+
+Hadoop3
+
+```
+[root@hadoop3 flume]# bin/flume-ng agent -c conf/ -f job/group3/flume33.conf  -n a3
+```
+
+hadoop2
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent -c conf/ -f job/group3/flume22.conf  -n a2
+```
+
+
+
+**使用hadoop2进行对文件追加内容**
+
+```
+[root@hadoop2 data]# echo hello >> flume2.txt
+```
+
+hadoop4进行相关的数据收集
+
+```
+2019-11-05 10:50:46,383 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 68 65 6C 6C 6F                                  hello }
+```
+
+
+
+**hadoop3上舒勇netcat 进行测试**
+
+```
+[root@hadoop3 ~]# nc localhost 44444
+hello word
+OK
+```
+
+hadoop4上进行响应
+
+```
+2019-11-05 10:54:44,436 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 68 65 6C 6C 6F 20 77 6F 72 64                   hello word }
+
+```
+
+
+
+之上就是一个测试案例
+
+此时的测试两个source使用同一个端口（hadoop4）上
+
+如果两个端口不一致
+
+此时可以使用两个source进行性汇总
+
+此时修改hadoop3的端口为4142
+
+```
+a3.sources = r1
+a3.sinks = k1
+a3.channels = c1
+
+# Describe/configure the source
+a3.sources.r1.type = netcat
+a3.sources.r1.bind = localhost
+a3.sources.r1.port = 44444
+
+
+# channels
+a3.channels.c1.type = memory
+a3.channels.c1.capacity = 1000
+a3.channels.c1.transactionCapacity = 100
+
+# sinks
+a3.sinks.k1.type = avro
+# 绑定到hadoop4机器上
+a3.sinks.k1.hostname = hadoop4
+a3.sinks.k1.port = 4142
+
+
+# bind
+a3.sources.r1.channels = c1 
+a3.sinks.k1.channel = c1
+```
+
+hadoop4的配置文件进行修改
+
+```
+a4.sources = r1 r2
+a4.sinks = k1
+a4.channels = c1
+
+# Describe/configure the source
+a4.sources.r1.type = avro
+a4.sources.r1.bind = hadoop4
+a4.sources.r1.port = 4141
+
+# Describe/configure the source
+a4.sources.r1.type = avro
+a4.sources.r1.bind = hadoop4
+a4.sources.r1.port = 4142
+
+# channels
+a4.channels.c1.type = memory
+a4.channels.c1.capacity = 1000
+a4.channels.c1.transactionCapacity = 100
+
+# sinks
+a4.sinks.k1.type = logger
+
+# bind
+a4.sources.r1.channels = c1 
+a4.sources.r2.channels = c1 
+a4.sinks.k1.channel = c1
+```
 
 
 
