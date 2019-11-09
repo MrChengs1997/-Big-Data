@@ -830,7 +830,8 @@ a4.sinks.k1.channel = c1
 hadoop4
 
 ```
-[root@hadoop4 flume]# bin/flume-ng agent -c conf/ -f job/group3/flume44.conf  -n a4 -Dflume.root.logger=INFO,console
+[root@hadoop4 flume]# bin/flume-ng agent -c conf/ -f job/group3/flume44.conf  -n a4 
+-Dflume.root.logger=INFO,console
 
 ```
 
@@ -946,6 +947,328 @@ a4.sinks.k1.type = logger
 a4.sources.r1.channels = c1 
 a4.sources.r2.channels = c1 
 a4.sinks.k1.channel = c1
+```
+
+
+
+
+
+## **3.5** **自定义** **Interceptor**
+
+
+
+**1）案例需求** 
+
+使用 Flume 采集服务器本地日志，需要按照日志类型的不同，将不同种类的日志发往不 
+
+同的分析系统。
+
+**2）需求分析** 
+
+在实际的开发中，一台服务器产生的日志类型可能有很多种，不同类型的日志可能需要 
+
+发送到不同的分析系统。此时会用到 Flume 拓扑结构中的 Multiplexing 结构，Multiplexing 
+
+的原理是，根据 event 中 Header 的某个 key 的值，将不同的 event 发送到不同的 Channel
+
+中，所以我们需要自定义一个 Interceptor，为不同类型的 event 的 Header 中的 key 赋予 
+
+不同的值。 
+
+
+
+以端口数据模拟日志，以数字（单个）和字母（单个）模拟不同类型 的日志
+
+需要自定义 interceptor 区分数字和字母，将其分别发往不同的分析系统 （Channel）。
+
+
+
+![](picc/自定义.png)
+
+
+
+
+
+参考地址:ctrl + f ：flume interceptor
+
+
+
+1、依赖
+
+```
+<dependency>
+<groupId>org.apache.flume</groupId>
+<artifactId>flume-ng-core</artifactId>
+<version>1.7.0</version>
+</dependency> 
+```
+
+
+
+2.定义 CustomInterceptor 类并实现 Interceptor 接口。
+
+```
+package flume.com.flume.interceptor;
+
+
+import org.apache.flume.Context;
+import org.apache.flume.Event;
+import org.apache.flume.interceptor.Interceptor;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+public class TypeInterceptor implements Interceptor {
+
+    //声明存放事件的集合
+    private List<Event> addEvent;
+
+    //初始化
+    @Override
+    public void initialize() {
+        //初始化
+        addEvent = new ArrayList<>();
+    }
+
+    //单个事件处理
+    //Event是个接口
+    @Override
+    public Event intercept(Event event) {
+        //获取时间 中的header
+        Map<String, String> headers = event.getHeaders();
+
+        //获取时间中的body
+        //byte[] body = event.getBody();
+        String body = new String(event.getBody());
+
+        //根据body中的内容进行添加相应的头信息
+        if (body.contains("hello")){
+            //添加头信息
+            headers.put("type","mrcheng");
+        }else {
+            headers.put("type","flume");
+        }
+
+        //可以进行事件的过滤
+
+
+        return event;
+    }
+
+
+
+    //批处理
+    @Override
+    public List<Event> intercept(List<Event> list) {
+        //首先进行清空集合
+        addEvent.clear();
+
+        //遍历events给每一个事件添加头信息
+        for (Event event :list){
+            addEvent.add(intercept(event));
+        }
+        //返回结果
+        return addEvent;
+    }
+
+    //关闭
+    @Override
+    public void close() {
+
+    }
+
+    //$Builder
+    public static class Builder implements Interceptor.Builder{
+
+        //返回值是一个拦截器对象
+        @Override
+        public Interceptor build() {
+            return new TypeInterceptor();
+        }
+
+        @Override
+        public void configure(Context context) {
+
+        }
+    }
+}
+
+```
+
+打包上传到目录下
+
+/opt/module/flume/lib/
+
+
+
+3.编辑 flume 配置文件
+
+hadoop2配置文件
+
+```
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1 k2
+a1.channels = c1 c2
+
+# Describe/configure the source
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 44444
+
+a1.sources.r1.interceptors = i1
+a1.sources.r1.interceptors.i1.type = flume.com.flume.interceptor.TypeInterceptor$Builder
+a1.sources.r1.selector.type = multiplexing
+
+a1.sources.r1.selector.header = type
+a1.sources.r1.selector.mapping.mrcheng = c1
+a1.sources.r1.selector.mapping.flume = c2
+
+# Describe the sink
+a1.sinks.k1.type = avro
+a1.sinks.k1.hostname = hadoop3
+a1.sinks.k1.port = 4141
+
+a1.sinks.k2.type=avro
+a1.sinks.k2.hostname = hadoop4
+a1.sinks.k2.port = 4242
+
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+# Use a channel which buffers events in memory
+
+a1.channels.c2.type = memory
+a1.channels.c2.capacity = 1000
+a1.channels.c2.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1 c2
+a1.sinks.k1.channel = c1
+a1.sinks.k2.channel = c2
+
+```
+
+
+
+hadoop3配置文件
+
+```
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+a1.sources.r1.type = avro
+a1.sources.r1.bind = hadoop3
+a1.sources.r1.port = 4141
+
+a1.sinks.k1.type = logger
+
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+a1.sinks.k1.channel = c1
+a1.sources.r1.channels = c1
+```
+
+
+
+hadoop4配置文件
+
+```
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+a1.sources.r1.type = avro
+a1.sources.r1.bind = hadoop4
+a1.sources.r1.port = 4242
+
+a1.sinks.k1.type = logger
+
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+a1.sinks.k1.channel = c1
+a1.sources.r1.channels = c1
+```
+
+
+
+启动
+
+```
+[root@hadoop4 flume]# bin/flume-ng agent -c  conf/ -f job/interceptor/flume4.conf -n a1 -Dflume.root.logger=INFO,console
+```
+
+
+
+```
+[root@hadoop3 flume]# bin/flume-ng agent -c conf/ -f job/interceptor/flume3.conf -n a1 -Dflume.root.logger=INFO,console
+```
+
+
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent -c conf/  -f job/interceptor/flume2.conf  -n a1
+
+```
+
+
+
+#### 功能
+
+在netcat中在进行输入数据
+
+根据是否有hello数据进行分发到不同的机器
+
+
+
+使用netcat进行测试
+
+**包含hello**
+
+```
+[root@hadoop2 ~]#  nc localhost 44444
+helloword 
+OK
+```
+
+此时在hadoop3上会有相应的数据打印
+
+```
+2019-11-09 11:09:12,517 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{type=mrcheng} body: 68 65 6C 6C 6F 77 6F 72 64 20                   helloword  }
+```
+
+
+
+**不包含hello**
+
+```
+[root@hadoop2 ~]#  nc localhost 44444
+helloword 
+OK
+
+OK
+
+OK
+sss
+OK
+
+```
+
+此时在hadoop4上会有相应的数据打印
+
+```
+2019-11-09 11:10:23,553 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{type=flume} body: }
+2019-11-09 11:10:23,554 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{type=flume} body: }
+2019-11-09 11:10:23,556 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{type=flume} body: 73 73 73                                        sss }
+
 ```
 
 
