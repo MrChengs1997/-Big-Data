@@ -1273,3 +1273,236 @@ OK
 
 
 
+
+
+
+
+
+
+## **3.6** **自定义** **Source**
+
+
+
+### 前言
+
+Source 是负责接收数据到 Flume Agent 的组件。
+
+Source 组件可以处理各种类型、各种格式的日志数据，包括 avro、thrift、exec、jms、spooling directory、netcat、sequence  generator、syslog、http、legacy。
+
+官方提供的 source 类型已经很多，但是有时候并不能 满足实际开发当中的需求，此时需要根据实际需求自定义某些 source。 
+
+
+
+官方也提供了自定义 source 的接口：
+
+https://flume.apache.org/FlumeDeveloperGuide.html#source 根据官方说明自定义 
+
+MySource 需要继承 AbstractSource 类并实现 Configurable 和 PollableSource 接口。 
+
+
+
+实现相应方法： 
+
+getBackOffSleepIncrement()//暂不用 
+
+getMaxBackOffSleepInterval()//暂不用 
+
+configure(Context context)//初始化 context（读取配置文件内容） 
+
+process()//获取数据封装成 event 并写入 channel，这个方法将被循环调用。 
+
+使用场景：读取 MySQL 数据或者其他文件系统。 
+
+
+
+### **需求**
+
+使用 flume 接收数据，并给每条数据添加前缀，输出到控制台。前缀可从 flume 配置文 
+
+件中配置。
+
+
+
+![](picc/自定义source.jpg)
+
+### 分析
+
+![](picc/source分析.jpg)
+
+
+
+
+
+### java代码
+
+```
+package flume.com.flume.source;
+
+import org.apache.flume.Context;
+import org.apache.flume.EventDeliveryException;
+import org.apache.flume.PollableSource;
+import org.apache.flume.conf.Configurable;
+import org.apache.flume.event.SimpleEvent;
+import org.apache.flume.source.AbstractSource;
+
+
+public class MySource extends AbstractSource implements Configurable,PollableSource {
+
+    //定义全局的前缀和后缀
+    private String  pre = null;
+    private String  sub = null;
+
+    //1、接收数据
+    //2、封装为事件
+    //3、将事件传递channel
+    @Override
+    public Status process() throws EventDeliveryException {
+
+        //定义状态
+        Status status = null;
+
+
+        try {
+            //1、接收数据(造数据)
+            for (int i = 0;i <=4;i++){
+                //2、构造事件对象（Event实现类）
+                SimpleEvent simpleEvent = new SimpleEvent();
+
+                //3、事件设置值
+                simpleEvent.setBody((pre + "--" + i + "--" + sub).getBytes());
+
+                //4、将事件传递给channel
+                getChannelProcessor().processEvent(simpleEvent);
+
+                //正常完成
+                status = Status.READY;
+            }
+
+        }catch (Exception e){
+            status = Status.BACKOFF;
+        }
+
+        //线程进行休眠
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        return status;
+    }
+
+
+    //初始化 context（读取配置文件内容）
+    @Override
+    public void configure(Context context) {
+        //读取配置信息 给前后缀赋值
+        pre = context.getString("pre");
+        //如果为空加上默认值
+        sub = context.getString("sub","cn");
+    }
+
+    //增加某个值
+    @Override
+    public long getBackOffSleepIncrement() {
+        return 0;
+    }
+
+    //初始值
+    @Override
+    public long getMaxBackOffSleepInterval() {
+        return 0;
+    }
+}
+
+```
+
+打包上传到lib文件下
+
+
+
+source.conf 配置文件
+
+```
+# Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = flume.com.flume.source.MySource
+a1.sources.r1.pre =  mrchengs
+a1.sources.r1.sub = com
+
+# Describe the sink
+a1.sinks.k1.type = logger
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+```
+
+
+
+启动服务：
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent -c conf/ -f job/source/source.conf  -n a1 -Dflume.root.logger=INFO,console
+```
+
+
+
+此时控制台就会定期打印出数据
+
+```
+2019-11-10 02:37:17,132 (conf-file-poller-0) [INFO - org.apache.flume.node.Application.startAllComponents(Application.java:171)] Starting Sink k1
+2019-11-10 02:37:17,134 (conf-file-poller-0) [INFO - org.apache.flume.node.Application.startAllComponents(Application.java:182)] Starting Source r1
+2019-11-10 02:37:17,251 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 6D 72 63 68 65 6E 67 73 2D 2D 30 2D 2D 63 6F 6D mrchengs--0--com }
+2019-11-10 02:37:17,251 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 6D 72 63 68 65 6E 67 73 2D 2D 31 2D 2D 63 6F 6D mrchengs--1--com }
+2019-11-10 02:37:17,252 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 6D 72 63 68 65 6E 67 73 2D 2D 32 2D 2D 63 6F 6D mrchengs--2--com }
+2019-11-10 02:37:17,252 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 6D 72 63 68 65 6E 67 73 2D 2D 33 2D 2D 63 6F 6D mrchengs--3--com }
+2019-11-10 02:37:17,252 (SinkRunner-PollingRunner-DefaultSinkProcessor) [INFO - org.apache.flume.sink.LoggerSink.process(LoggerSink.java:95)] Event: { headers:{} body: 6D 72 63 68 65 6E 67 73 2D 2D 34 2D 2D 63 6F 6D mrchengs--4--com }
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
