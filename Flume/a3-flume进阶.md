@@ -1476,29 +1476,204 @@ a1.sinks.k1.channel = c1
 
 
 
+## **3.7** **自定义** **Sink**
+
+### 前沿
+
+Sink 不断地轮询 Channel 中的事件且批量地移除它们，并将这些事件批量写入到存储 
+
+或索引系统、或者被发送到另一个 Flume Agent。 
+
+
+
+Sink 是完全事务性的。在从 Channel 批量删除数据之前，每个 Sink 用 Channel 启动一 
+
+个事务。批量事件一旦成功写出到存储系统或下一个 Flume Agent，Sink 就利用 Channel 提 
+
+交事务。
+
+
+
+**事务一旦被提交，该 Channel 从自己的内部缓冲区删除事件。**
+
+
+
+Sink 组件目的地包括 hdfs、logger、avro、thrift、ipc、file、null、HBase、solr、 
+
+自定义。
+
+
+
+官方提供自定义 sink 的接口：
+
+https://flume.apache.org/FlumeDeveloperGuide.html#sink 根据官方说明自定义 
+
+MySink 需要继承 AbstractSink 类并实现 Configurable 接口。 
+
+
+
+实现相应方法： 
+
+configure(Context context)//初始化 context（读取配置文件内容） 
+
+process()//从 Channel 读取获取数据（event），这个方法将被循环调用。 
+
+使用场景：读取 Channel 数据写入 MySQL 或者其他文件系统。 
 
 
 
 
 
+### 需求
+
+使用 flume 接收数据，并在 Sink 端给每条数据添加前缀和后缀，输出到控制台。前后 
+
+缀可在 flume 任务配置文件中配置。 
+
+
+
+![](picc/自定义sink.jpg)
 
 
 
 
 
+### 代码实现
+
+```
+package flume.com.flume.sink;
+
+import org.apache.flume.*;
+import org.apache.flume.conf.Configurable;
+import org.apache.flume.sink.AbstractSink;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class MySink  extends AbstractSink implements Configurable {
+
+    //获取logger对象
+    Logger logger = LoggerFactory.getLogger(MySink.class);
+
+    //定义前后缀
+    private  String pre;
+    private  String sub;
+
+    //获取channel
+    //从channel获取数据
+    //发送数据
+    @Override
+    public Status process() throws EventDeliveryException {
+
+        //定义返回状态
+        Status  status = null;
+
+        //1、获取channel
+        Channel channel = getChannel();
+
+        //2、从channel中获取事务
+        Transaction transaction = channel.getTransaction();
+
+        //3、开启事务
+        transaction.begin();
+
+       try{
+
+           //4、获取数据
+           Event event = channel.take();
+
+           //5、处理事件(业务逻辑)
+           String body = new String(event.getBody());
+           //具体在控制台还是文件依赖配置文件的使用
+           logger.info(body);
+
+           //6、提交事务
+           transaction.commit();
+
+           status = Status.READY;
+       }catch (Exception r){
+           //回滚事务
+           transaction.rollback();
+
+           status = Status.BACKOFF;
+       }finally {
+           //关闭事务
+           if (transaction != null){
+               transaction.close();
+           }
+       }
+        return status;
+    }
+
+    @Override
+    public void configure(Context context) {
+        //读取配置文件给前后缀赋值
+        pre = context.getString("pre");
+        sub = context.getString("sub","cn");
+
+
+    }
+}
+```
 
 
 
+conf配置文件
+
+```
+ # Name the components on this agent
+a1.sources = r1
+a1.sinks = k1
+a1.channels = c1
+
+# Describe/configure the source
+a1.sources.r1.type = netcat
+a1.sources.r1.bind = localhost
+a1.sources.r1.port = 44444
+
+# Describe the sink
+a1.sinks.k1.type = flume.com.flume.sink.MySink
+a1.sinks.k1.pre = hello:--
+a1.sinks.k1.sub = --com
+
+
+# Use a channel which buffers events in memory
+a1.channels.c1.type = memory
+a1.channels.c1.capacity = 1000
+a1.channels.c1.transactionCapacity = 100
+
+# Bind the source and sink to the channel
+a1.sources.r1.channels = c1
+a1.sinks.k1.channel = c1
+```
+
+启动
+
+```
+[root@hadoop2 flume]# bin/flume-ng agent conf/ -f job/sink/sink.conf  -n a1  -Dflume.root.logger=INFO,console
+
+```
 
 
 
+使用nc进行测试
 
+```
+[root@hadoop2 ~]# nc localhost 44444
+hello
+OK
+goog^Hd^H^H^H^H^H
+OK
+good
+OK
+```
 
+结果
 
-
-
-
-
+```
+19/11/10 04:03:06 INFO sink.MySink: hello
+19/11/10 04:03:37 INFO sink.MySink: good
+19/11/10 04:03:39 INFO sink.MySink: good
+```
 
 
 
