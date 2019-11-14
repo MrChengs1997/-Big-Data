@@ -262,5 +262,13 @@ consumer，不保证一个 topic 的整体（多个 partition 间）的顺序；
 
 
 
+**注意：**
 
+**0.9版本之前之前offset存储在zk**
+
+**0.9版本之后offset存储在本地（本地的Kafka中）**
+
+
+
+kafka存储数据在磁盘中
 
