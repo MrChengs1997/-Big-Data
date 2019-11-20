@@ -144,6 +144,86 @@ c、既没有partition的值有没有key值的情况下
 
 ### 2.2 数据可靠性的保证
 
+为保证producer发送的数据能可靠到达指定topic
+
+topic的每个partition受到producer发送的数据后
+
+都需要向producer大宋ack(acknownledgement确认收到)
+
+如果producer收到ack，就会进行下一轮的发送，否则重新发送数据
+
+
+
+![](picc/ack.png)
+
+
+
+#### **副本数据同步策略**
+
+![](picc/celue.png)
+
+
+
+kafka选择第二个方案
+
+1、同样为了容忍n台节点故障，第一种需要2n+1个副本，第二种方案只需要n+1个副本
+
+​      kafka的每个区都有大量的数据，而一种方案会造成大量的数据冗余
+
+2、网络延迟对kafka的影响比较小
+
+
+
+#### **ISR**（0.9移除）
+
+![](picc/isr.png)
+
+ replica.time.max.ms延迟时间
+
+在延迟时间内就加入，否则就删除
+
+很快在拉过来
+
+
+
+#### ack应答机制
+
+对于某些部太重要的数据，对数据的可靠性要求不是很高
+
+能够容忍数据少量丢失，所以没必要等isr中的follower全部接受成功
+
+
+
+提供了3中可靠性级别
+
+用户根据可靠性和延迟进行权衡
+
+**0：**producer不等待broker的ack，这一操作提供一个低延时
+
+​      broker一接收到还没有写入磁盘就已经返回，当broker发生故障有**可能数据丢失**
+
+
+
+**1：**producer等待broker的ack，partition的leader落盘成功护返回ack
+
+​	   如果在follower同步之前leader故障，**将会数据丢失**
+
+
+
+**-1：**producer等待broder的ack，partition的leader和follower（isr中）全部落盘成功才返回ack
+
+​		但是如果在follower同步完成之后，border发送ack之前，leader发生故障
+
+​		此时会造成**数据重复**
+
+
+
+
+
+
+
+
+
 
 
 
