@@ -322,7 +322,233 @@ pull可以根据消费者的消费能力以适应当前的的消费速率
 
 
 
+### 3.2 分区分配策略
+
+一个consumer group中有多个consumer
+
+一个topic中有多个partition
+
+必然会有partition的分配问题
+
+确定那个partition由那个consumer来消费
 
 
 
+在启动消费者时候触发
+
+启动一个消费者分配所有的分区
+
+在启动一个消费者进行重新分配分区
+
+**消费者个数发生变化时都会触发改变**
+
+
+
+两种策略：**RoundRobin**、**Range**
+
+
+
+#### RoundRobin（轮询）
+
+做不到完全平均
+
+![](picc/round1.png)
+
+
+
+![](picc/round2.png)
+
+
+
+涉及到多个topic
+
+假设T1（topic）由三个partition（0，1，2）
+
+假设T2（topic）由三个partition（0，1，2）
+
+将两个主题当作一个整体来看
+
+此时由6个对象，（TopicAndPartition对象）根据hash值进行排序
+
+假设排序之后，会将排序之后的对象进行轮询
+
+
+
+#### Range
+
+![](picc/nge.png)
+
+![](picc/range.jpg)
+
+
+
+按照单个**主题**进行划分
+
+不是按照消费者主题进行划分
+
+可能带来消费数据不对等问题
+
+
+
+### 3.3 offset的维护
+
+由于consumer在消费过程中可能出现断点宕机等问题
+
+consumer恢复后
+
+需要从故障前的位置继续消费
+
+consumer需要实时激励自己消费到了那个offset
+
+一边恢复之后继续消费
+
+
+
+offset保存在zk，同时还保存在Kafka本地
+
+
+
+按照**消费者组**+**主题**+**分区** 确定offset
+
+
+
+#### 保存zk中：
+
+```
+bin/kafka-topic.sh  --crete --topic bigdata --zookeeper hadoop2:2181 --partitions 2 --replication-factor 2
+```
+
+生产者
+
+```
+bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
+```
+
+消费者
+
+```
+bin/kafka-console-consumer.sh --zookeeper hadoop2:2181 --topic bigdata
+```
+
+
+
+生产者进行生产消息
+
+生产者可以进行消息的消费
+
+
+
+**进入zk目录**
+
+```
+bin/zkCline.sh
+```
+
+此时进行ls /进行查询
+
+除了zookeeper都是Kafka的资源
+
+
+
+
+
+此时查询
+
+```
+get /controller
+```
+
+是用来争抢资源
+
+**broderid**
+
+
+
+
+
+此时查询
+
+```
+ls /brokers
+```
+
+[ids,topics,seqid]
+
+```
+ls /brokers/ids
+```
+
+此时依赖其组成集群
+
+```
+ls /brokers/topics
+```
+
+[bigdata]
+
+是两个主题
+
+
+
+
+
+此时查看consumers
+
+消费者进行存数据
+
+```
+ls /consumers
+```
+
+[console-consumer-xxxxx] (x代表数字)
+
+此时这个代表消费者组（上述开启的消费者），没有指定消费者组
+
+此时的消费者组是随机的
+
+```
+ls /consumers/console-consumer-xxxxx
+```
+
+[ids,owners,offsets]
+
+```
+ls /consumers/console-consumer-xxxxx/offsets
+```
+
+[bigdata] (代表topic)
+
+```
+ls /consumers/console-consumer-xxxxx/offsets/bigdata
+```
+
+[0,1] (分区)
+
+进行get值
+
+```
+get /consumers/console-consumer-xxxxx/offsets/bigdata/0
+```
+
+1 (此时发送的是一条数据)
+
+```
+get /consumers/console-consumer-xxxxx/offsets/bigdata/1
+```
+
+0   (此时发送的是一条数据)
+
+再次发送一条数据（**轮询策略**）
+
+```
+get /consumers/console-consumer-xxxxx/offsets/bigdata/1
+```
+
+1   (此时发送的是二条数据)
+
+
+
+#### 保存在本地
+
+kafka
 
