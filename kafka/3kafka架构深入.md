@@ -412,19 +412,22 @@ offset保存在zk，同时还保存在Kafka本地
 
 
 
-#### 保存zk中：
+#### 保存zk中
+
+1、创建新的topic
 
 ```
-bin/kafka-topic.sh  --crete --topic bigdata --zookeeper hadoop2:2181 --partitions 2 --replication-factor 2
+[root@hadoop2 kafka]# bin/kafka-topics.sh --zookeeper hadoop2:2181 --create --replication-factor 2 --partitions 2 --topic bigdata
+Created topic "bigdata".
 ```
 
-生产者
+2、生产者（进行发送消息的窗口）
 
 ```
 bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
 ```
 
-消费者
+3、消费者（进入消费者消费的窗口）
 
 ```
 bin/kafka-console-consumer.sh --zookeeper hadoop2:2181 --topic bigdata
@@ -432,13 +435,28 @@ bin/kafka-console-consumer.sh --zookeeper hadoop2:2181 --topic bigdata
 
 
 
+4、测试发送&消费消息
+
 生产者进行生产消息
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
+>hello bgi
+```
 
 生产者可以进行消息的消费
 
+```
+[root@hadoop2 kafka]# bin/kafka-console-consumer.sh --zookeeper hadoop2:2181 --topic bigdata
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+hello bgi
+```
 
 
-**进入zk目录**
+
+
+
+5、进入zk目录
 
 ```
 bin/zkCline.sh
@@ -446,16 +464,31 @@ bin/zkCline.sh
 
 此时进行ls /进行查询
 
+```
+[zk: localhost:2181(CONNECTED) 1] ls /
+[cluster, controller, brokers, zookeeper, mr, sanguo, admin, isr_change_notification, controller_epoch, consumers, latest_producer_id_block, config]
+```
+
 除了zookeeper都是Kafka的资源
 
 
 
-
-
-此时查询
+6、此时查询**controller**
 
 ```
-get /controller
+[zk: localhost:2181(CONNECTED) 2] get /controller
+{"version":1,"brokerid":1,"timestamp":"1574607613727"}
+cZxid = 0x800000013
+ctime = Sun Nov 24 10:00:13 EST 2019
+mZxid = 0x800000013
+mtime = Sun Nov 24 10:00:13 EST 2019
+pZxid = 0x800000013
+cversion = 0
+dataVersion = 0
+aclVersion = 0
+ephemeralOwner = 0x26e9deab45a0000
+dataLength = 54
+numChildren = 0
 ```
 
 是用来争抢资源
@@ -464,62 +497,63 @@ get /controller
 
 
 
-
-
-此时查询
+7、此时查询**brokers**
 
 ```
-ls /brokers
+[zk: localhost:2181(CONNECTED) 3] ls /brokers
+[ids, topics, seqid]
 ```
 
 [ids,topics,seqid]
 
 ```
-ls /brokers/ids
+[zk: localhost:2181(CONNECTED) 4] ls /brokers/ids
+[0, 1, 2]
 ```
 
 此时依赖其组成集群
 
 ```
-ls /brokers/topics
+[zk: localhost:2181(CONNECTED) 5] ls /brokers/topics
+[bigdata, first]
 ```
 
-[bigdata]
-
-是两个主题
+是两个主题（已经创建好的两个主题）
 
 
 
-
-
-此时查看consumers
+8、此时查看**consumers**
 
 消费者进行存数据
 
 ```
-ls /consumers
+[zk: localhost:2181(CONNECTED) 6] ls /consumers
+[console-consumer-5395]
 ```
 
-[console-consumer-xxxxx] (x代表数字)
+[console-consumer-xxxx] (x代表数字)
 
 此时这个代表消费者组（上述开启的消费者），没有指定消费者组
 
 此时的消费者组是随机的
 
 ```
-ls /consumers/console-consumer-xxxxx
+[zk: localhost:2181(CONNECTED) 7] ls /consumers/console-consumer-5395
+[ids, owners, offsets]
 ```
 
 [ids,owners,offsets]
 
 ```
-ls /consumers/console-consumer-xxxxx/offsets
+[zk: localhost:2181(CONNECTED) 8] ls /consumers/console-consumer-5395/offsets
+[bigdata]
 ```
 
 [bigdata] (代表topic)
 
 ```
-ls /consumers/console-consumer-xxxxx/offsets/bigdata
+[zk: localhost:2181(CONNECTED) 9] ls /consumers/console-consumer-5395/offsets/bigdata
+[0, 1]
 ```
 
 [0,1] (分区)
@@ -527,13 +561,39 @@ ls /consumers/console-consumer-xxxxx/offsets/bigdata
 进行get值
 
 ```
-get /consumers/console-consumer-xxxxx/offsets/bigdata/0
+[zk: localhost:2181(CONNECTED) 10] get /consumers/console-consumer-5395/offsets/bigdata/0
+1
+cZxid = 0x80000004a
+ctime = Sun Nov 24 10:10:49 EST 2019
+mZxid = 0x80000004a
+mtime = Sun Nov 24 10:10:49 EST 2019
+pZxid = 0x80000004a
+cversion = 0
+dataVersion = 0
+aclVersion = 0
+ephemeralOwner = 0x0
+dataLength = 1
+numChildren = 0
+
 ```
 
 1 (此时发送的是一条数据)
 
 ```
-get /consumers/console-consumer-xxxxx/offsets/bigdata/1
+[zk: localhost:2181(CONNECTED) 11] get /consumers/console-consumer-5395/offsets/bigdata/1
+0
+cZxid = 0x80000004d
+ctime = Sun Nov 24 10:10:49 EST 2019
+mZxid = 0x80000004d
+mtime = Sun Nov 24 10:10:49 EST 2019
+pZxid = 0x80000004d
+cversion = 0
+dataVersion = 0
+aclVersion = 0
+ephemeralOwner = 0x0
+dataLength = 1
+numChildren = 0
+
 ```
 
 0   (此时发送的是一条数据)
@@ -541,7 +601,37 @@ get /consumers/console-consumer-xxxxx/offsets/bigdata/1
 再次发送一条数据（**轮询策略**）
 
 ```
-get /consumers/console-consumer-xxxxx/offsets/bigdata/1
+[root@hadoop2 kafka]# bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
+>hello bgi^H^H^[[D^[[D
+>zk
+
+
+
+[root@hadoop2 kafka]# bin/kafka-console-consumer.sh --zookeeper hadoop2:2181 --topic bigdata
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+hello bgi
+zk
+```
+
+
+
+此时再次进行查询即可（本地会友延迟）
+
+```
+[zk: localhost:2181(CONNECTED) 13] get /consumers/console-consumer-5395/offsets/bigdata/1
+1
+cZxid = 0x80000004d
+ctime = Sun Nov 24 10:10:49 EST 2019
+mZxid = 0x80000004e
+mtime = Sun Nov 24 10:18:49 EST 2019
+pZxid = 0x80000004d
+cversion = 0
+dataVersion = 1
+aclVersion = 0
+ephemeralOwner = 0x0
+dataLength = 1
+numChildren = 0
+
 ```
 
 1   (此时发送的是二条数据)
@@ -550,5 +640,106 @@ get /consumers/console-consumer-xxxxx/offsets/bigdata/1
 
 #### 保存在本地
 
-kafka
+bin/kafka-console-consumer.sh  --topic first --bootstrap-server hadoop2:9092
+
+使用上述的命令zk中没有消费者组内容
+
+Kafka 0.9版本之前，consumer默认将offset保存在zk中
+
+Kafka 0.9版本之后，consumer默认将offset保存在Kafka一个内置的topic中，该topic为-consumer_offsets.
+
+
+
+1、修改配置文件consumer.properties
+
+用创建的消费者去消费系统的topic
+
+```
+exclude.internal.topics = false
+```
+
+```
+[root@hadoop2 config]# vim consumer.properties
+
+# timeout in ms for connecting to zookeeper
+zookeeper.connection.timeout.ms=6000
+
+#consumer group id
+group.id=test-consumer-group
+
+#consumer timeout
+#consumer.timeout.ms=5000
+
+exclude.internal.topics=false
+
+```
+
+
+
+2、读取offset
+
+0.11.0.0之前版本(<)
+
+```
+bin/kafka-console-consumer.sh --topic __consumer_offsets --zookeeper hadoop2:2181 --formatter "kafka.coordinator.GroupMetadataManager\$OffsetsMessageFormatter" --consumer.config config/consumer.properties --from-beginning
+```
+
+0.11.0.0之前版后（>=）
+
+```
+bin/kafka-console-consumer.sh --topic __consumer_offsets --zookeeper hadoop2:2181 --formatter "kafka.coordinator.group.GroupMetadataManager\$OffsetsMessageFormatter" --consumer.config config/consumer.properties --from-beginning
+```
+
+
+
+--zookeeper hadoop2:2181
+
+消费者A消费T1主题
+
+使用bootstrap-server
+
+A会把数据放在 __ consumer_offsets （A相当于__consumer_offsets）是生产者
+
+
+
+生产者
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
+>hello
+>
+```
+
+
+
+消费者
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-consumer.sh  --topic bigdata  --bootstrap-server hadoop2:9092
+hello
+```
+
+
+
+再次启动则需要进行修改配置文件的consumer.properties的组名
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-consumer.sh --topic __consumer_offsets --zookeeper hadoop2:2181 --formatter "kafka.coordinator.group.GroupMetadataManager\$OffsetsMessageFormatter" --consumer.config config/consumer.properties --from-beginning
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+
+
+[console-consumer-70552,bigdata,0]::[OffsetMetadata[2,NO_METADATA],CommitTime 1574610547967,ExpirationTime 1574696947967]
+[console-consumer-70552,bigdata,1]::[OffsetMetadata[1,NO_METADATA],CommitTime 1574610547967,ExpirationTime 1574696947967]
+
+```
+
+[console-consumer-70552（**组**）,bigdata（**topic**）,0（**分区**） ] ::[OffsetMetadata[2（**消费的数据个数**）,NO_METADATA],CommitTime 1574610547967,ExpirationTime 1574696947967]
+
+[console-consumer-70552,bigdata,1] ::[OffsetMetadata[1,NO_METADATA],CommitTime 1574610547967,ExpirationTime 1574696947967]
+
+消费存放在那个主题里面，根据hash值进行保存的（只要GTP不变）
+
+GTP唯一确定offset
+
+
 
