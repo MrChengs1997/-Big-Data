@@ -374,6 +374,8 @@ pull可以根据消费者的消费能力以适应当前的的消费速率
 
 
 
+
+
 #### Range
 
 ![](picc/nge.png)
@@ -387,6 +389,36 @@ pull可以根据消费者的消费能力以适应当前的的消费速率
 不是按照消费者主题进行划分
 
 可能带来消费数据不对等问题
+
+
+
+
+
+如：
+
+T1（0 1 2）  T2（0 1 2 ）
+
+（A B）消费者组 1    
+
+（C）消费者组2
+
+A --> T1 
+
+B --> T1 T2
+
+C --> T1
+
+**RoundRobin**:会将T1 T2 进行排序然后轮询发给消费组1（此时可能会将数据发给A）(此时不要使用RoundRobin)
+
+​					 
+
+**Range**：根据订阅进行发送*跟组没有太大的关系）
+
+​				T1(0 1 2)都会发给C
+
+​				T1(0 1 )->A     T1(2)->B    T2(0 1 2 )-->B
+
+​				**先看订阅的消费组，再看消费者**
 
 
 
@@ -740,6 +772,217 @@ Using the ConsoleConsumer with old consumer is deprecated and will be removed in
 消费存放在那个主题里面，根据hash值进行保存的（只要GTP不变）
 
 GTP唯一确定offset
+
+
+
+### 3.4 消费者组案例
+
+
+
+（1）、在Hadoop2&Hadoop3上修改consumer.properties配置文件，修改group.id属性为任意的组名
+
+```
+# timeout in ms for connecting to zookeeper
+zookeeper.connection.timeout.ms=6000
+
+#consumer group id
+group.id=test-consumer-group
+
+```
+
+主要使消费者在同一个消费者组中
+
+
+
+（2）、hadoop2&hadoop3上分别启动消费者
+
+```
+hadoop2
+[root@hadoop2 kafka]# bin/kafka-console-consumer.sh  --topic bigdata  --zookeeper hadoop2:2181 --consumer.config config/consumer.properties
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+tst
+hello
+
+hadoop3
+[root@hadoop3 kafka]# bin/kafka-console-consumer.sh  --topic bigdata  --zookeeper hadoop2:2181 --consumer.config config/consumer.properties
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+```
+
+
+
+（3）、hadoop2启动生产者
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
+>tst
+>hello
+```
+
+
+
+（4）、查询hadoop2&hadoop3接收者
+
+此时在此进行发送消息
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-producer.sh --broker-list hadoop2:9092 --topic bigdata
+>tst
+>hello
+>cde
+>
+
+```
+
+
+
+消费者
+
+```
+[root@hadoop3 kafka]# bin/kafka-console-consumer.sh  --topic bigdata  --zookeeper hadoop2:2181 --consumer.config config/consumer.properties
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+cde
+
+```
+
+```
+[root@hadoop2 kafka]# bin/kafka-console-consumer.sh  --topic bigdata  --zookeeper hadoop2:2181 --consumer.config config/consumer.properties
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+tst
+hello
+
+```
+
+此时只有一个消费者进行消费信息!
+
+不同消费者组不受影响
+
+不同组可以同时消费同一个topic
+
+可以进行轮询的分流效果
+
+
+
+
+
+创建时由两个分区
+
+开启三个消费者
+
+此时大于分区数，就要进行重新分配
+
+
+
+
+
+## 4、高效读写数据
+
+#### 1、顺序写磁盘
+
+Kafka的producer生产数据，要写入到log文件中，写的过程是一直追加到文件的末尾，顺序写。
+
+（舒徐写600M/s，随即写100k/s）
+
+与磁盘机械机构有关，顺序写快，省区大量磁头寻址时间
+
+
+
+#### 2、零拷贝技术
+
+
+
+![](picc/零拷贝.png)
+
+一般的实现：文件->系统->用户空间->NIC
+
+Kafka的实现：文件->系统->NIC
+
+![](picc/零拷贝1.png)
+
+
+
+
+
+
+
+## 5、 zk的作用
+
+Kafka集群中有一个broker会被选举为Controller
+
+负责**管理集群broker的上下线**
+
+所有topic的**分区副本**和**leader选举等**工作
+
+Controller的管理工具都是依赖于zk的
+
+
+
+Controller的管理工作都是依赖zk
+
+
+
+leader的选举
+
+![](picc/leader.png)
+
+
+
+
+
+## 6、事务
+
+kafka自0.11版本之后引入事务的支持
+
+事务可以保证Kafka在ExactlyOnce语义的基础上
+
+生产和消费可以跨分区和会话-->全成功&全失败
+
+
+
+### 1、producer事务（主要）
+
+为了实现跨分区的会话事务，**需要引入一个全局的唯一的TransactionID**（客户端赋值）
+
+并将Producer获得的PID和TransactionID绑定
+
+当Producer重启之后就可以通过正在进行的TransactionID获得原来的PID
+
+
+
+为了管理TransactionID，Kafka引入了一个新的组建**Transaction Coordinator**
+
+Producer就是通过和Transaction Coordinator交互获得TransactionID对应任务的状态
+
+Transaction Coordinator负责将事务所有写入到Kafka的一个内部的Topic
+
+即使任务重启，由于事务状态得到保存，进行中的事务可以得到恢复，从而继续运行
+
+
+
+
+
+### 2、Consumer事务（精准一致性消费）
+
+事务机制主要是在producer方便考虑
+
+对于consumer来说，事务保证就会相对弱一点
+
+尤其无法保证Commit的信息被精确消费
+
+这是由于consumer可以通过offset访问任意信息
+
+且不同的Segment File声明周期不同
+
+同意事务的消费可能出现重启后被删除的的情况
+
+
+
+
+
+
+
+
+
+
 
 
 
