@@ -820,7 +820,261 @@ offset的维护相当繁琐，需要考虑到消费者的**Rebalace**
 
 
 
+## 拦截器（Interceptor）
+
+### 3.1、拦截器原理
+
+Producer拦截器实在0.10版本引入
+
+主要用于**实现clients端 的定制化控制逻辑**
 
 
 
 
+
+interceptor使得用户在消息发送之前以及producer回调逻辑有机会对详细进行定制化要求
+
+如：修改消息等....
+
+producer允许用户指定多个interceptor按序对同一条消息进行拦截形成拦截器链
+
+Intercepto实现的接口是：org.apache.kafka.clients.producer.**ProducerInterceptor**
+
+接口需要实现的方法
+
+- **-configure**（configs）：
+
+  获取配置信息和初始化数据时调用
+
+- **onSend**（ProducerRecord）：
+
+  方法封装进KafkaProducer.send方法中，运行在用户主线程中
+
+​	   Producer确保在消息被序列化以及计算分区之前调用该方法
+
+​	   **用户可以在该方法中对消息做任何操作，最好不要修改消息所在的topic&分区**，以免影响目标分区的计算
+
+- **onAcknowledgement**(RecordMetadata,Exception):
+
+  **会在消息从RecordAccumulator成功发送到Kafka Broker之后，或者在发送过程中失败时调用**
+
+  通常都是在producer回调函数触发之前
+
+  onAcknowledgement运行在producer的IO线程中，因此不要在该方法中实现重要的逻辑代码
+
+  否则回拖慢producer的发送效率
+
+  
+
+- close（）
+
+  关闭interceptor，主要用于执行一些资源你的清理工作
+
+  interceptor可能被运行在多个线程中，因此在具体实现时用户需要自行确保线程安全
+
+  **如果指定了多个interceptor，则producer将按照指定的顺序去调用他们**
+
+  仅仅时捕获每个intercceptor可能抛出的异常记录到错误日志而非向上传递。 
+
+
+
+### 3.2、拦截器的实现
+
+
+
+![](picc/拦截器.jpg)
+
+**时间拦截器**
+
+```
+package com.mrcheng.kafka.interceptor;
+
+import org.apache.kafka.clients.producer.ProducerInterceptor;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+
+import java.util.Map;
+
+public class timeInterceptor implements ProducerInterceptor<String,String> {
+    @Override
+    public void configure(Map<String, ?> map) {
+
+    }
+
+    @Override
+    public ProducerRecord<String, String> onSend(ProducerRecord<String, String> record) {
+
+        //取出消息
+        String value = record.value();
+
+        //创建新的ProducerRecord对象
+        return new ProducerRecord<String, String>(record.topic(),record.partition(),
+                record.key(),System.currentTimeMillis()+"-"+value);
+    }
+
+    @Override
+    public void onAcknowledgement(RecordMetadata recordMetadata, Exception e) {
+
+    }
+
+    @Override
+    public void close() {
+
+    }
+}
+```
+
+
+
+**次数拦截器**
+
+```
+package com.mrcheng.kafka.interceptor;
+
+import org.apache.kafka.clients.producer.ProducerInterceptor;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
+
+import java.util.Map;
+
+//返回成功还是失败的个数
+public class countInterceptor implements ProducerInterceptor<String,String> {
+    int success;
+    int error;
+
+    //不需要对数据进行操作
+    @Override
+    public ProducerRecord<String, String> onSend(ProducerRecord<String, String> producerRecord) {
+        return producerRecord;
+    }
+
+    @Override
+    public void onAcknowledgement(RecordMetadata recordMetadata, Exception e) {
+        //成功
+        if (recordMetadata != null){
+            success++;
+        }else {
+            error++;
+        }
+    }
+
+    @Override
+    public void close() {
+        System.out.println("success:"+ success);
+        System.out.println("error:"+ error);
+    }
+
+    @Override
+    public void configure(Map<String, ?> map) {
+
+    }
+}
+```
+
+
+
+生产者
+
+```
+    public static void main(String[] args) {
+
+        //1、创建生产者配置信息
+        Properties properties = new Properties();
+        // Kafka 服务端的主机名和端口号
+
+        properties.put("bootstrap.servers", "hadoop2:9092,hadoop3:9092,hadoop4:9092");
+        // 等待所有副本节点的应答级别
+        properties.put("acks", "all");
+        // 消息发送最大尝试次数
+        properties.put("retries", 2);
+        // 一批消息处理大小
+        properties.put("batch.size", 16384);
+        // 请求延时
+        properties.put("linger.ms", 100);
+        // 发送缓存区内存大小
+        properties.put("buffer.memory", 33554432);//32M
+
+        //properties.put("group.id", "test-consumer-group");//32M
+
+        // key 序列化
+        properties.put("key.serializer",
+                "org.apache.kafka.common.serialization.StringSerializer");
+        // value 序列化
+        properties.put("value.serializer",
+                "org.apache.kafka.common.serialization.StringSerializer");
+
+        //添加拦截器(>1)
+        //可以进行添加多个
+        ArrayList<String> interceptor = new ArrayList<>();
+        interceptor.add("com.mrcheng.kafka.interceptor.timeInterceptor");
+        interceptor.add("com.mrcheng.kafka.interceptor.countInterceptor");
+        properties.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG, interceptor);
+
+        //2、创建生产者对象
+        KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
+        System.out.println("创建生产者对象...");
+        System.out.println(producer.toString());
+
+
+        for (int i =0 ;i<10;i++){
+            System.out.println("msg" + i);
+
+            String msg = "msg" + i;
+            producer.send(new ProducerRecord<>("first",msg));
+        }
+
+        System.out.println("结束1...");
+        //4、关闭
+        producer.close();
+        System.out.println("结束2...");
+    }
+```
+
+
+
+此时查看控制台的数据消息
+
+```
+[root@hadoop3 kafka]# bin/kafka-console-consumer.sh  --topic first --zookeeper hadoop2:2181
+Using the ConsoleConsumer with old consumer is deprecated and will be removed in a future major release. Consider using the new consumer by passing [bootstrap-server] instead of [zookeeper].
+1
+1575212789864-msg1
+1575212789873-msg3
+1575212789873-msg5
+1575212789873-msg7
+1575212789874-msg9
+1575212788659-msg0
+1575212789865-msg2
+1575212789873-msg4
+1575212789873-msg6
+1575212789874-msg8
+
+```
+
+
+
+执行控制台的打印
+
+```
+创建生产者对象...
+org.apache.kafka.clients.producer.KafkaProducer@57829d67
+msg0
+msg1
+msg2
+msg3
+msg4
+msg5
+msg6
+msg7
+msg8
+msg9
+结束1...
+success:10
+error:0
+结束2...
+
+```
+
+
+
+关于关闭资源最好使用try...catch...finally进行关闭资源
