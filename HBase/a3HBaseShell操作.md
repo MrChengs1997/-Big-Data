@@ -559,3 +559,58 @@ delete：需要山三个参数
 deleteall：删除一个rowkey
 
 deleteall  'stu','1002'
+
+
+
+
+
+**删表**
+
+truncate  '表名'
+
+提示：清空表的操作顺序为先 disable，然后再 truncate。
+
+
+
+### **4、变更表信息** 
+
+```
+hbase(main):002:0> put 'stu','1005','info1:name','zhangsan'
+0 row(s) in 0.2360 seconds
+
+hbase(main):003:0> put 'stu','1005','info1:name','lisi'
+0 row(s) in 0.0110 seconds
+
+hbase(main):004:0> scan 'stu'
+ROW                                      COLUMN+CELL                                                                                                          
+ 1001              column=info1:addr, timestamp=1577028345949, value=beijing             
+ 1001              column=info2:addr, timestamp=1577028364249, value=shanghai             
+ 1002              column=info1:phone, timestamp=1577028358740, value=12341134143         
+ 1005              column=info1:name, timestamp=1577114556573, value=lisi                                                               
+3 row(s) in 0.0350 seconds
+```
+
+
+
+```
+hbase(main):005:0> get 'stu','1005',{COLUMN=>'info1:name',VERSIONS=>3}
+COLUMN                                   CELL                                                                                                                 
+ info1:name                              timestamp=1577114556573, value=lisi                                                                                  
+1 row(s) in 0.0760 seconds
+
+```
+
+
+
+将 info 列族中的数据存放 3 个版本：
+
+```
+hbase(main):022:0> alter 'student',{NAME=>'info',VERSIONS=>3}
+hbase(main):022:0> get 
+'student','1001',{COLUMN=>'info:name',VERSIONS=>3}
+```
+
+版本是HBase保留几个版本的
+
+
+
